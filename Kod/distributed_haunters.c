@@ -10,33 +10,17 @@
 #define CLOCK 111
 
 int size,pid;
-int* lclock = NULL;
-
-typedef struct lclocked_int_s {
-	int* lclock;
-	int value;
-} lclocked_int;
-
-//MPI_Datatype MY_LCLOCKED_INT;
+int lclock = 0;
 
 void cprintf(const char* format,...){
-	if(lclock == NULL){
-		fprintf(stderr,"Clock has not been initialized");
-		exit(-1);
-	}
-
 	char frmt[128] = "";
-	{
-		sprintf(frmt,"%d : ",pid);
-		int i=0;
-		for(;i<size;i++){
-			char tmp[10];
-			sprintf(tmp,"%c%d",i>0?',':'[',lclock[i]);
-			strcat(frmt,tmp);
-		}
-		strcat(frmt,"] :\t");
-	}
 
+	sprintf(frmt,"%d : ",pid);
+	{
+		char tmp[10];
+		sprintf(tmp,"%d : ",lclock);
+		strcat(frmt,tmp);
+	}
 	va_list args;
 	va_start(args,format);
 
@@ -50,8 +34,8 @@ void cprintf(const char* format,...){
 
 void dream(){
 	struct timespec tim, tim2;
-	tim.tv_sec = 1;
-	tim.tv_nsec = rand()%1000;
+	tim.tv_sec = 0;
+	tim.tv_nsec = rand()%1000000;
 	nanosleep(&tim,&tim2);
 }
 
@@ -59,53 +43,27 @@ void MY_Send(const void *buf, int count, MPI_Datatype datatype, int dest, int ta
 
 	dream();
 
-	lclock[pid]++;
-	lclocked_int pckt;
-	pckt.lclock = (int *)malloc(size*sizeof(int));
-	memcpy(pckt.lclock,lclock,sizeof(int)*size);
+	lclock++;
 
-	pckt.value = *((int *) buf);
-	MPI_Send(&(pckt.value),count,datatype,dest,tag,comm);
-	MPI_Send(pckt.lclock,size,MPI_INT,dest,CLOCK,comm);
-	free(pckt.lclock);
+	MPI_Send(buf,count,datatype,dest,tag,comm);
+	MPI_Send(&lclock,1,MPI_INT,dest,CLOCK,comm);
 }
 
-void MY_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status *status){
+bool MY_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status *status){//returns true if receiver is older than sender
 
 	dream();
 
-	lclocked_int pckt;	
-	pckt.lclock = (int *)malloc(size*sizeof(int));
-	MPI_Recv(&(pckt.value),count,datatype,source,tag,comm,status);
-	MPI_Recv(pckt.lclock,size,MPI_INT,source,CLOCK,comm,status);
+	int clock;
 
-	*((int*)buf) = pckt.value;
+	MPI_Recv(buf,count,datatype,source,tag,comm,status);
+	MPI_Recv(&clock,1,MPI_INT,source,CLOCK,comm,status);
 
-	{
-		int i=0;
-		for(;i<size ; i++){
-			if(lclock[i]<pckt.lclock[i])
-				lclock[i] = pckt.lclock[i];
-		}
-		lclock[pid]++;
-	}
+	bool older = lclock>clock;
+	lclock = (older?lclock:clock)+1;
 
-	free(pckt.lclock);
+	return older;
 }
-/*
-void initStructs(){
-	//MY_LCLOCKED_INT
-	const int n_items = 2;
-	int blocklengths[2] = {size,1};
-	MPI_Datatype types[2] = {MPI_INT,MPI_INT};
-	MPI_Aint offsets[2];
-	offsets[0] = offsetof(lclocked_int,lclock);
-	offsets[1] = offsetof(lclocked_int,value);
 
-	MPI_Type_create_struct(n_items,blocklengths,offsets,types,&MY_LCLOCKED_INT);
-	MPI_Type_commit(&MY_LCLOCKED_INT);
-}
-*/
 int main(int argc, char** argv){
 	srand(time(NULL));
 
@@ -118,13 +76,6 @@ int main(int argc, char** argv){
 		exit(-1);
 	}
 	
-	lclock = (int *)malloc(size*sizeof(int));
-	{
-		int i = 0;	
-		for(; i<size ; i++)
-			lclock[i]=0;
-	}
-
 	int K,M,P,*z;
 	bool *D;
 	sscanf(argv[1],"%d",&K);
@@ -158,8 +109,6 @@ int main(int argc, char** argv){
 	
 
 
-	//initStructs();
-
 	
 
 	MPI_Barrier(MPI_COMM_WORLD);
@@ -185,7 +134,5 @@ int main(int argc, char** argv){
 		}
 	}
 
-//	MPI_Type_free(&MY_LCLOCKED_INT);
 	MPI_Finalize();
-	free(lclock);
 }
