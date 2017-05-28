@@ -63,6 +63,8 @@ void dream(int sec){
 
 void MY_Send(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm){
 
+	//cprintf("Sending to %d",dest);
+
 	dream(0);
 
 	lclock++;
@@ -78,13 +80,15 @@ void MY_Send(const void *buf, int count, MPI_Datatype datatype, int dest, int ta
 
 bool MY_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status *status){//returns true if receiver is older than sender
 
+	//cprintf("Receiving from %d",source);
+
 	dream(0);
 
 	int clock;
 
 	MPI_Recv(buf,count,datatype,source,tag,comm,status);
 
-	//cprintf("Recv %d from %d tagged %d (%d,%d)",*((int *)buf),source,tag,status->MPI_SOURCE,status->MPI_TAG);
+	//cprintf("Recv %d from %d tagged %d",*((int *)buf),status->MPI_SOURCE,status->MPI_TAG);
 
 	MPI_Recv(&clock,1,MPI_INT,status->MPI_SOURCE,CLOCK,comm,NULL);
 
@@ -117,17 +121,11 @@ void initVars(int argc, char** argv){
 	H = (bool*)malloc(D*sizeof(bool));
 	{
 		int i=0;
-		int tmp = 0;
 		for(;i<size ; i++){
 			sscanf(argv[i+5],"%d",&(z[i]));
-			tmp += z[i];
 		}
 		for(i=0;i<D ; i++){
 			H[i] = true;
-		}
-		if(tmp!=P){
-			fprintf(stderr,"sum(z)!=P (%d!=%d)\n",tmp,P);
-			MPI_Abort(MPI_COMM_WORLD,1);
 		}
 	}
 
@@ -141,7 +139,7 @@ void initVars(int argc, char** argv){
 			cprintf("z[%d]=%d",i,z[i]);
 		}
 		i=0;
-		for(;i<size;i++){
+		for(;i<D;i++){
 			cprintf("H[%d]=%d",i,H[i]);
 		}
 	}
@@ -152,32 +150,29 @@ void *answerer(void *arg){
 	bool older;
 	MPI_Status status;
 	while(!stop){
-		//cprintf("Loop %d",stop);
-
+		//cprintf("countD=%d, pstat=%d,di=%d, dj=%d, H[i]=%d, H[j]=%d",countD,pstat,di,dj, H[di],H[dj]);		
 		older = MY_Recv(&buf,1,MPI_INT,MPI_ANY_SOURCE,MPI_ANY_TAG,MPI_COMM_WORLD,&status);
 		
-		//cprintf("buf %d ; src %d ; tag %d",buf,status.MPI_SOURCE,status.MPI_TAG);
-
 		switch(status.MPI_TAG){
 			case DREQ:
-				//Jeśli proces otrzymujący wiadomość nie chce straszyć w tym domu, lub jest młodszy wysyła zgodę. W przeciwnym wypadku wysyła zabronienie.
-				if(di==buf && older)
+				if((di==buf && older) || !H[buf]){
 					buf = -1;
+				} else if(di==buf && !older){
+					pstat = 3;
+					countD = 0;
+				}
+
 				MY_Send(&buf,1,MPI_INT,status.MPI_SOURCE,DACK,MPI_COMM_WORLD);		
 				break;
 			case DACK:
 				if(buf == -1){
 					pstat = 3;
 					countD = 0;
-				} else if (buf == di){
-					countD = (countD==size-1)?1:countD+1;
+				} else if (buf == di && pstat == 1){
+					countD++;
 					if(countD==size-1){
-						//Jeśli proces otrzyma od wszystkich zgodę może straszyć w domu, ustawia $H[i] = false$, oraz $H[j] = true$, gdzie $j$ to identyfikator domu w którym straszył sotatnio. 
 						pstat = 2;
 						countD = 0;
-						H[di] = false;
-						H[dj] = true;
-						dj = di;
 					}
 				}
 				break;
@@ -189,26 +184,37 @@ void *answerer(void *arg){
 }
 
 void lockD(){
-	//Proces zaczyna rezerwację domów od domu o numerze $ i = pid * \frac{D}{n}$.
-	pstat = 1;
 	di = pid * D/size;
 	
 	do{
-		//cprintf("pstat %d di %d",pstat,di);
-		//Jeśli $H[i] == false$ to proces stara się o rezerwację domu o numerze $(++i) \% D$.
-		while(!H[di]) di=(di+1)%D;	
+		pstat = 1;
 
-		//Proces wysyła do wszystkich pozostałych procesów informację o domu w którym chce straszyć.
+		while(!H[di]) di=(di+1)%D;	
+		//cprintf("Tries %d",di);
+
 	    	int k;
 		for(k=0 ; k<size ; k++){
 			if(k==pid) continue;
 			MY_Send(&di,1,MPI_INT,k,DREQ,MPI_COMM_WORLD);
 		}
-		while(pstat==1)dream(1);
+		while(pstat==1)dream(0);
 
-		//Jeśli otrzyma chociaż jedno zabronienie stara się o rezerwację domu o numerze $(++i) \% D$
 		di = pstat==3?(di+1)%D:di;
 	} while(pstat==3);
+
+	H[di] = false;
+	H[dj] = true;
+	dj = di;
+}
+
+void hprint(){
+	int i;
+	char tmp[30] = "";
+	for(i=0 ; i<D ; i++){
+		sprintf(tmp,"%s%c%d",tmp,i>0?',':'(',H[i]);
+	}
+	strcat(tmp,")");
+	cprintf("%s",tmp);
 }
 
 int main(int argc, char** argv){
@@ -233,19 +239,23 @@ int main(int argc, char** argv){
 
 	int i;
 	for(i=0 ; i<LIMIT ; i++){
-		cprintf("Wants to enter house");
+		cprintf("Wants to enter house %d time",i);
+		hprint();
 		lockD();
+		hprint();
 		cprintf("Entered house %d",di);
 		dream(rand()%10);
-		cprintf("Wants to leave house");
+		//cprintf("Wants to leave house");
 		//unlockD();
-		cprintf("Left house");
+		cprintf("Left house %d",di);
+		hprint();
 		dream(rand()%5);
 	}
 
+	MPI_Barrier(MPI_COMM_WORLD);
 	stop = true;
 	free(H);
 	free(z);
-	pthread_join(thread,NULL);	
 	MPI_Finalize();
+	pthread_join(thread,NULL);	
 }
