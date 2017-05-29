@@ -9,7 +9,7 @@
 
 #include <pthread.h>
 
-#define LIMIT 2
+#define LIMIT 20
 
 //tags:
 #define CLOCK 111 //Lamport's clock
@@ -61,36 +61,42 @@ void dream(int sec){
 	nanosleep(&tim,&tim2);
 }
 
-void MY_Send(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm){
+void MY_Send(int *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm){
 
 	//cprintf("Sending to %d",dest);
+    int msg[2];
+    msg[0] = buf[0];
+    msg[1] = ++lclock;
 
 	dream(0);
 
-	lclock++;
-
-	MPI_Send(buf,count,datatype,dest,tag,comm);
+	MPI_Send(msg,2,MPI_INT,dest,tag,comm);
 
 	//cprintf("Sent %d to %d tagged %d",*((int *) buf),dest,tag);
 
-	MPI_Send(&lclock,1,MPI_INT,dest,CLOCK,comm);
+	//MPI_Send(&lclock,1,MPI_INT,dest,CLOCK,comm);
 
 	//cprintf("Sent clock");
 }
 
-bool MY_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status *status){//returns true if receiver is older than sender
+bool MY_Recv(int *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status *status){//returns true if receiver is older than sender
 
 	//cprintf("Receiving from %d",source);
 
 	dream(0);
 
+    int msg[2];
+
 	int clock;
 
-	MPI_Recv(buf,count,datatype,source,tag,comm,status);
+	MPI_Recv(msg,2,datatype,source,tag,comm,status);
+    
+    buf[0] = msg[0];
+    clock = msg[1];
 
 	//cprintf("Recv %d from %d tagged %d",*((int *)buf),status->MPI_SOURCE,status->MPI_TAG);
 
-	MPI_Recv(&clock,1,MPI_INT,status->MPI_SOURCE,CLOCK,comm,NULL);
+	//MPI_Recv(&clock,1,MPI_INT,status->MPI_SOURCE,CLOCK,comm,NULL);
 
 	//cprintf("Recv clock");
 
@@ -112,7 +118,7 @@ void initVars(int argc, char** argv){
 	sscanf(argv[3],"%d",&P);
 	sscanf(argv[4],"%d",&D);
 
-	if(!(K<M<P<D)){
+	if(!((K<M) & (M<P) & (P<D) & (size<D))){
 		fprintf(stderr,"K<M<P<D\n");
 		MPI_Abort(MPI_COMM_WORLD,1);
 	}
@@ -236,7 +242,6 @@ int main(int argc, char** argv){
 		fprintf(stderr,"Error on pthread_create\n");
 		MPI_Abort(MPI_COMM_WORLD,1);
 	}
-
 	int i;
 	for(i=0 ; i<LIMIT ; i++){
 		cprintf("Wants to enter house %d time",i);
@@ -244,12 +249,12 @@ int main(int argc, char** argv){
 		lockD();
 		hprint();
 		cprintf("Entered house %d",di);
-		dream(rand()%10);
+		dream(rand()%2);
 		//cprintf("Wants to leave house");
 		//unlockD();
 		cprintf("Left house %d",di);
 		hprint();
-		dream(rand()%5);
+		dream(rand()%2);
 	}
 
 	MPI_Barrier(MPI_COMM_WORLD);
