@@ -209,6 +209,7 @@ void *answerer(void *arg){
 				}
 				break;
             case KMREQ:
+                older = (buf < kmRequestID || (buf == kmRequestID && pid > status.MPI_SOURCE));
                 if (pstat == 0 || (pstat == 4 && older)) {
                     MY_Send(&buf, 1, MPI_INT, status.MPI_SOURCE, KMACK, MPI_COMM_WORLD);
                     printf("zgoda z %d do %d\n", pid, status.MPI_SOURCE);
@@ -270,9 +271,14 @@ void lockD(){
 void putEverythingBack() {
     int i;
     pstat = 0;
+    kmRequestID++;
     for (i = 0; i < size; i++) {
-        if (kmProcesses[i] != -1)
+        if (i == pid)
+            continue;
+        if (kmProcesses[i] != -1) {
             MY_Send(&kmProcesses[i], 1, MPI_INT, i, KMACK, MPI_COMM_WORLD);
+            printf("Zgoda z %d do %d\n", pid, i);
+        }
         kmProcesses[i] = -1;
     }
 }
