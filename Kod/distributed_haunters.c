@@ -18,6 +18,8 @@
 #define DACK 333 //House acknowledge
 #define KMREQ 1025 //Kasprzak and fog request
 #define KMACK 1026 //Kasprzak and fog acknowledge
+#define PREQ 2049
+#define PACK 2050
 
 bool stop = false;
 
@@ -31,6 +33,8 @@ status grupy egzorcystow
 3	nie dostana danego domu
 4   chca kasprzaga i sprzęt do mgły
 5   otrzymali kasprzaga i mgłę
+6   chcą prześcieradła
+7   otrzymali prześcieradła
 */
 
 int size,pid;
@@ -38,6 +42,7 @@ int lclock = 0;
 int clockSem;
 
 int *kmProcesses, kmRequestID = 0;
+int *pProcesses, pRequestID = 0, *pReserved;
 
 int K,M,P,D,*z;
 bool *H;
@@ -150,11 +155,16 @@ void initVars(int argc, char** argv){
 	z = (int*)malloc(size*sizeof(int));
 	H = (bool*)malloc(D*sizeof(bool));
     kmProcesses = (int*) malloc(size * sizeof(int));
+    pProcesses = (int*) malloc(size * sizeof(int));
+    pReserved = (int*) malloc(size * sizeof(int));
 	{
 		int i=0;
 		for(;i<size ; i++){
 			sscanf(argv[i+5],"%d",&(z[i]));
             kmProcesses[i] = -1;
+            pProcesses[i] = -1;
+            if (i != pid)
+                pReserved[i] = z[i];
 		}
 		for(i=0;i<D ; i++){
 			H[i] = true;
@@ -224,6 +234,26 @@ void *answerer(void *arg){
                         pstat = 5;
                 }
                 break;
+            case PREQ:
+                older = (buf < pRequestID || (buf == kmRequestID && pid > status.MPI_SOURCE));
+                if (pstat == 0 || pstat == 4 || pstat == 5 || (pstat == 6 && older)) {
+                    pReserved[status.MPI_SOURCE] = z[status.MPI_SOURCE];
+                    MY_Send(&buf, 1, MPI_INT, status.MPI_SOURCE, PACK, MPI_COMM_WORLD);
+                } else {
+                    buf = -1;
+                    pProcesses[status.MPI_SOURCE] = buf;
+                }
+                break;
+            case PACK:
+                if (buf == pRequestID) {
+                    pReserved[status.MPI_SOURCE] = 0;
+                    int sum = 0;
+                    for (buf = 0; buf < size; buf++)
+                        sum += pReserved[buf];
+                    if (P - sum >= z[pid])
+                        pstat = 7;
+                }
+                break;
 			default:
 				cprintf("Unknown message: %d, tagged: %d",buf,status.MPI_TAG);
 		}
@@ -231,8 +261,18 @@ void *answerer(void *arg){
 	pthread_exit(NULL);
 }
 
-void lockKP(){
-    int notDone;
+void lockP() {
+    int i;
+    pstat = 6;
+    for (i = 0; i < size; i++) {
+        if (i == pid)
+            continue;
+        MY_Send(&pRequestID, 1, MPI_INT, i, PREQ, MPI_COMM_WORLD);
+    }
+    while (pstat != 7);
+}
+
+void lockKP() {
     int i;
     pstat = 4;
     for (i = 0; i < size; i++) {
@@ -272,15 +312,27 @@ void putEverythingBack() {
     int i;
     pstat = 0;
     kmRequestID++;
+    pRequestID++;
     for (i = 0; i < size; i++) {
         if (i == pid)
             continue;
         if (kmProcesses[i] != -1) {
             MY_Send(&kmProcesses[i], 1, MPI_INT, i, KMACK, MPI_COMM_WORLD);
             printf("Zgoda z %d do %d\n", pid, i);
+            kmProcesses[i] = -1;
         }
-        kmProcesses[i] = -1;
     }
+    for (i = 0; i < size; i++) {
+        if (i == pid)
+            continue;
+        if (pProcesses[i] != -1) {
+            MY_Send(&pProcesses[i], 1, MPI_INT, i, PACK, MPI_COMM_WORLD);
+            pProcesses[i] = -1;
+        }
+    }
+    for (i = 0; i < size; i++)
+        if (i != pid)
+            pReserved[i] = z[i];
 }
 
 void hprint(){
@@ -319,6 +371,10 @@ int main(int argc, char** argv){
         lockKP();
         cprintf("Kasprzak and fog machine taken");
         dream(0);
+        //----------Przescieradla---------
+        cprintf("Wants to take %d p", z[pid]);
+        lockP();
+        cprintf("P taken");
         //----------HOUSE-----------------
 		cprintf("Wants to enter house %d time",i);
 		hprint();
