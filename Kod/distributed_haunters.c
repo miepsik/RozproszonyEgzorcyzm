@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <time.h>
+#include <sys/sem.h>
 
 #include <pthread.h>
 
@@ -15,6 +16,8 @@
 #define CLOCK 111 //Lamport's clock
 #define DREQ 222 //House request
 #define DACK 333 //House acknowledge
+#define KMREQ 1025 //Kasprzak and fog request
+#define KMACK 1026 //Kasprzak and fog acknowledge
 
 bool stop = false;
 
@@ -26,10 +29,15 @@ status grupy egzorcystow
 1	chca dom
 2	otrzymali dom
 3	nie dostana danego domu
+4   chca kasprzaga i sprzęt do mgły
+5   otrzymali kasprzaga i mgłę
 */
 
 int size,pid;
 int lclock = 0;
+int clockSem;
+
+int *kmProcesses, kmRequestID = 0;
 
 int K,M,P,D,*z;
 bool *H;
@@ -66,7 +74,14 @@ void MY_Send(int *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_
 	//cprintf("Sending to %d",dest);
     int msg[2];
     msg[0] = buf[0];
-    msg[1] = ++lclock;
+    struct sembuf s;
+    s.sem_num = 0;
+    s.sem_op = -1;
+    semop(clockSem, &s, 1);
+    lclock++;
+    s.sem_op = 1;
+    semop(clockSem, &s, 1);
+    msg[1] = lclock;
 
 	dream(0);
 
@@ -83,6 +98,9 @@ bool MY_Recv(int *buf, int count, MPI_Datatype datatype, int source, int tag, MP
 
 	//cprintf("Receiving from %d",source);
 
+    struct sembuf s;
+    s.sem_num = 0;
+    s.sem_op = -1;
 	dream(0);
 
     int msg[2];
@@ -94,14 +112,19 @@ bool MY_Recv(int *buf, int count, MPI_Datatype datatype, int source, int tag, MP
     buf[0] = msg[0];
     clock = msg[1];
 
-	//cprintf("Recv %d from %d tagged %d",*((int *)buf),status->MPI_SOURCE,status->MPI_TAG);
+	//cprintf("Recv %d from %d tagged %d",buf[0],status->MPI_SOURCE,status->MPI_TAG);
 
 	//MPI_Recv(&clock,1,MPI_INT,status->MPI_SOURCE,CLOCK,comm,NULL);
 
 	//cprintf("Recv clock");
 
 	bool older = lclock>clock;
+    if (lclock == clock && pid > status->MPI_SOURCE)
+        older = true;
+    semop(clockSem, &s, 1);
 	lclock = (older?lclock:clock)+1;
+    s.sem_op = 1;
+    semop(clockSem, &s, 1);
 
 	return older;
 }
@@ -112,23 +135,26 @@ void initVars(int argc, char** argv){
 		MPI_Abort(MPI_COMM_WORLD,1);
 	}
 	
-	
+	clockSem = semget(1234, 1, IPC_CREAT);
+    semctl(clockSem, 0, SETVAL, 1);
 	sscanf(argv[1],"%d",&K);
 	sscanf(argv[2],"%d",&M);
 	sscanf(argv[3],"%d",&P);
 	sscanf(argv[4],"%d",&D);
 
-	if(!((K<M) & (M<P) & (P<D) & (size<D))){
-		fprintf(stderr,"K<M<P<D\n");
+	if(!((M<K) & (K<P) & (P<D) & (size<D))){
+		fprintf(stderr,"M<K<P<D\n");
 		MPI_Abort(MPI_COMM_WORLD,1);
 	}
 
 	z = (int*)malloc(size*sizeof(int));
 	H = (bool*)malloc(D*sizeof(bool));
+    kmProcesses = (int*) malloc(size * sizeof(int));
 	{
 		int i=0;
 		for(;i<size ; i++){
 			sscanf(argv[i+5],"%d",&(z[i]));
+            kmProcesses[i] = -1;
 		}
 		for(i=0;i<D ; i++){
 			H[i] = true;
@@ -152,7 +178,7 @@ void initVars(int argc, char** argv){
 }
 
 void *answerer(void *arg){
-	int buf,countD=0;
+	int buf,countD=0, countKM = 0;
 	bool older;
 	MPI_Status status;
 	while(!stop){
@@ -182,11 +208,39 @@ void *answerer(void *arg){
 					}
 				}
 				break;
+            case KMREQ:
+                if (pstat == 0 || (pstat == 4 && older)) {
+                    MY_Send(&buf, 1, MPI_INT, status.MPI_SOURCE, KMACK, MPI_COMM_WORLD);
+                    printf("zgoda z %d do %d\n", pid, status.MPI_SOURCE);
+                } else {
+                    kmProcesses[status.MPI_SOURCE] = buf;
+                    buf = -1;
+                }
+                break;
+            case KMACK:
+                if (buf == kmRequestID) {
+                    if (++countKM >= size - M)
+                        pstat = 5;
+                }
+                break;
 			default:
 				cprintf("Unknown message: %d, tagged: %d",buf,status.MPI_TAG);
 		}
 	}
 	pthread_exit(NULL);
+}
+
+void lockKP(){
+    int notDone;
+    int i;
+    pstat = 4;
+    for (i = 0; i < size; i++) {
+        if (i == pid)
+            continue;
+        MY_Send(&kmRequestID, 1, MPI_INT, i, KMREQ, MPI_COMM_WORLD);
+    }
+    while (pstat != 5);
+    
 }
 
 void lockD(){
@@ -213,6 +267,16 @@ void lockD(){
 	dj = di;
 }
 
+void putEverythingBack() {
+    int i;
+    pstat = 0;
+    for (i = 0; i < size; i++) {
+        if (kmProcesses[i] != -1)
+            MY_Send(&kmProcesses[i], 1, MPI_INT, i, KMACK, MPI_COMM_WORLD);
+        kmProcesses[i] = -1;
+    }
+}
+
 void hprint(){
 	int i;
 	char tmp[30] = "";
@@ -232,8 +296,8 @@ int main(int argc, char** argv){
 	initVars(argc,argv);	
 
 	srand(time(NULL));
-
-	MPI_Barrier(MPI_COMM_WORLD);
+	
+    MPI_Barrier(MPI_COMM_WORLD);
 
 	//-----------TEST-----------
 
@@ -244,6 +308,12 @@ int main(int argc, char** argv){
 	}
 	int i;
 	for(i=0 ; i<LIMIT ; i++){
+        //----------KASPRZAK & FOG------------
+        cprintf("Wants to take Kasprzak and fog machine");
+        lockKP();
+        cprintf("Kasprzak and fog machine taken");
+        dream(0);
+        //----------HOUSE-----------------
 		cprintf("Wants to enter house %d time",i);
 		hprint();
 		lockD();
@@ -255,6 +325,7 @@ int main(int argc, char** argv){
 		cprintf("Left house %d",di);
 		hprint();
 		dream(rand()%2);
+        putEverythingBack();
 	}
 
 	MPI_Barrier(MPI_COMM_WORLD);
