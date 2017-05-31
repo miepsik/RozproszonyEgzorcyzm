@@ -92,7 +92,7 @@ void MY_Send(int *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_
 
 	MPI_Send(msg,2,MPI_INT,dest,tag,comm);
 
-	//cprintf("Sent %d to %d tagged %d",*((int *) buf),dest,tag);
+	//cprintf("Sent %d to %d tagged %d",buf[0],dest,tag);
 
 	//MPI_Send(&lclock,1,MPI_INT,dest,CLOCK,comm);
 
@@ -165,6 +165,8 @@ void initVars(int argc, char** argv){
             pProcesses[i] = -1;
             if (i != pid)
                 pReserved[i] = z[i];
+            else 
+                pReserved[i] = 0;
 		}
 		for(i=0;i<D ; i++){
 			H[i] = true;
@@ -222,7 +224,6 @@ void *answerer(void *arg){
                 older = (buf < kmRequestID || (buf == kmRequestID && pid > status.MPI_SOURCE));
                 if (pstat == 0 || (pstat == 4 && older)) {
                     MY_Send(&buf, 1, MPI_INT, status.MPI_SOURCE, KMACK, MPI_COMM_WORLD);
-                    printf("zgoda z %d do %d\n", pid, status.MPI_SOURCE);
                 } else {
                     kmProcesses[status.MPI_SOURCE] = buf;
                     buf = -1;
@@ -318,7 +319,6 @@ void putEverythingBack() {
             continue;
         if (kmProcesses[i] != -1) {
             MY_Send(&kmProcesses[i], 1, MPI_INT, i, KMACK, MPI_COMM_WORLD);
-            printf("Zgoda z %d do %d\n", pid, i);
             kmProcesses[i] = -1;
         }
     }
@@ -336,13 +336,13 @@ void putEverythingBack() {
 }
 
 void hprint(){
-	int i;
-	char tmp[30] = "";
-	for(i=0 ; i<D ; i++){
-		sprintf(tmp,"%s%c%d",tmp,i>0?',':'(',H[i]);
-	}
-	strcat(tmp,")");
-	cprintf("%s",tmp);
+    int i;
+    char tmp[30] = "";
+    for(i=0 ; i<D ; i++){
+        sprintf(tmp,"%s%c%d",tmp,i>0?',':'(',H[i]);
+    }
+    strcat(tmp,")");
+    cprintf("%s",tmp);
 }
 
 int main(int argc, char** argv){
@@ -357,8 +357,6 @@ int main(int argc, char** argv){
 	
     MPI_Barrier(MPI_COMM_WORLD);
 
-	//-----------TEST-----------
-
 	pthread_t thread;
 	if((pthread_create(&thread,NULL,answerer,NULL))){
 		fprintf(stderr,"Error on pthread_create\n");
@@ -372,9 +370,9 @@ int main(int argc, char** argv){
         cprintf("Kasprzak and fog machine taken");
         dream(0);
         //----------Przescieradla---------
-        cprintf("Wants to take %d p", z[pid]);
+        cprintf("Wants to take %d sheet", z[pid]);
         lockP();
-        cprintf("P taken");
+        cprintf("Sheet taken");
         //----------HOUSE-----------------
 		cprintf("Wants to enter house %d time",i);
 		hprint();
