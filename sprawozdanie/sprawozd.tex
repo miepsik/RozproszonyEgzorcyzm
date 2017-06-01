@@ -7,6 +7,7 @@
 \usepackage[OT4]{fontenc} 
 \usepackage{graphicx,color} %include pdf's (and png's for raster graphics... avoid raster graphics!) 
 \usepackage{url} 
+\usepackage{csquotes}
 \usepackage[pdftex,hyperfootnotes=false,pdfborder={0 0 0}]{hyperref} %za wszystkimi pakietami; pdfborder nie wszedzie tak samo zaimplementowane bo specyfikacja nieprecyzyjna; pod miktex'em po prostu nie widac wtedy ramek
 
 
@@ -22,19 +23,38 @@
 \input{_tytulowa}
 
 \section{Wstęp}
-Zakładamy niezawodne kanały FIFO i procesy nieulegające awarii (jednostkowy czas przesyłania wiadomości oraz zerowy czas przetwarzania lokalnego?).
+Zakładamy w pełni asynchroniczne środowisko, niezawodne kanały FIFO i procesy nieulegające awarii Podczas obliczania złożoności komunikacyjnej i czasowej przyjmujemy jednostkowy czas przesyłania wiadomości oraz zerowy czas przetwarzania lokalnego, a także topologię pełnej siatki (każdy-z-każdym).
+
+\section{Opis problemu}
+
+\begin{displayquote}
+\textit{Grupka egzorcystów, sfrustrowana brakiem duchów, postanawia nieco sobie dopomóc w interesie i przy pomocy urządzeń z magazynu (do wytwarzania sztucznej mgły, magnetofonów marki Kasprzak oraz zużytych prześcieradeł z domu opieki społecznej) po kryjomu urządza "nawiedzenia" wybranych domów. 
+Z uwagi na ograniczoną liczbę rekwizytów oraz z uwagi na fakt, że równocześnie nie powinni egzorcyści nawiedzać tych samych domów, konieczne okazało się zaimplementowanie mobilnej aplikacji szeregującej nawiedzanie duchów.}
+\end{displayquote}
+
+Wiadomo, że liczba urządzeń do wytwarzania sztucznej mgły jest mniejsza od liczby magnetofonów Kasprzak, a ta z kolei od liczby zużytych prześcieradeł. 
+Liczba domów jest jeszcze większa. 
+Dom, który dopiero co był nawiedzony musi chwilę odczekać, zanim będzie go można nawiedzać ponownie.
+
+Poszczególne firmy ,,egzorcystów'' zostały zamodelowane jako pojedyncze procesy.
+Proces kolejno przechodzi przez sekcje krytyczne najpierw związane ze zdobyciem magnetofonu oraz urządzenia do mgły, następnie odpowiedniej liczby prześcieradeł, a na koniec wybraniem domu do straszenia.
+
+\section{Algorytm}
+
+Przyjmujemy następujące oznaczenia:
 \begin{tightlist}
     \item $n$ - liczba procesów
     \item $pid$ - identyfikator konkretnego procesu z zakresu [0 - n-1]
     \item $D$ - liczba domów do straszenia
-    \item $M$ - liczba urządeń do wytwarzania sztucznej mgły
+    \item $M$ - liczba urządzeń do wytwarzania sztucznej mgły
     \item $P$ - liczba prześcieradeł
     \item $K$ - liczba magnetofonów
     \item $z[n]$ - tablica zawierająca liczebność i-tej grupy
 \end{tightlist}
 
-\section{Algorytm}
-Proces będzie kolejno przechodził przez sekcje krytyczne najpierw związane ze zdobyciem magnetofonu oraz urządzenia do mgły, następna sekcja krytyczna dotyczy zdobycia odpowiedniej liczby prześcieradeł i na koniec wybranie domu do straszenia.
+W kanale łączącym dwa procesy mogą się jednocześnie znaleźć dwie wiadomości dotyczące aktualnej sekcji i ,,poruszające się z przeciwnych stron'' --- prośby o zasób lub odpowiedzi na nie.
+
+
 \subsection{Magnetofon oraz mgła}
 Rozbijanie tego na dwie osobne sekcje nie ma sensu, gdyż i tak wąskim gardłem będzie ten zasób, którego jest mniej, czyli w tym wypadku urządzeń do wytwarzania mgły. Każdy proces ubiega się o jeden nierozróżnialny magnetofon i jedno nierozróżnialne urządzenie do wytwarzania mgły.
 \begin{enumerate}
@@ -43,25 +63,39 @@ Rozbijanie tego na dwie osobne sekcje nie ma sensu, gdyż i tak wąskim gardłem
     \item Proces ubiegający się o wejście do sekcji krytycznej wchodzi do niej po zebraniu $n - M$ zgód
     \item Po opuszczeniu sekcji krytycznej wysyła ACK do młodszych procesów, które także ubiegały się o wejście
 \end{enumerate}
+
+Aby przejść przez tą sekcję krytyczną proces musi wysłać $n-1$ wiadomości o ubieganiu się o dostęp oraz musi otrzymać tyleż zgód (ACK).
+Złożoność komunikacyjna wynosi w takiej sytuacji $2(n-1)$, a czasowa --- $2$.
+
 \subsection{Prześcieradła}
 Każdy proces stara się o uzyskanie $z[pid]$ z $P$ nierozróżnialnych prześcieradeł.
 \begin{enumerate}
     \item Proces ubiegający się o prześcieradła wysyła informację zawierającą ilość potrzebnych prześcieradeł do wszystkich pozostałych procesów
-    \item Jeśli proces nie ubiega się o prześcieradła, lub jest młodszy odsyła informację, iż rezerwuje on $0$ prześcieradeł. W przeciwnym wypadku $pid$-y proces odsyła informację o rezerwacji $z[pid]$ prześcieradeł i zapamiętuje proces ubiegający się o prześcieradła. Po oddaniu prześcieradeł wysyła on informację o zwróceniu zasobów.
+    \item Jeśli proces nie ubiega się o prześcieradła, lub jest młodszy odsyła informację, iż rezerwuje on $0$ prześcieradeł. W przeciwnym wypadku odsyła informację o rezerwacji $z[pid]$ prześcieradeł i zapamiętuje proces ubiegający się o prześcieradła. Po oddaniu prześcieradeł wysyła on informację o zwróceniu zasobów.
     \item Proces ubiegający się o prześcieradła czeka na wiadomości od wszystkich procesów a następnie aktualizuje informacje aż liczba wolnych prześcieradeł będzie większa bądź równa $z[pid]$.
     \item Po opuszczeniu sekcji krytycznej wysyła informację o zwolnieniu prześcieradeł do wszystkich procesów, którym wcześniej wysłał informację o zarezerwowaniu prześcieradeł.
 \end{enumerate}
+
+Aby przejść przez tą sekcję krytyczną proces musi wysłać $n-1$ wiadomości o ubieganiu się o dostęp 
+oraz otrzymać co najmniej tyleż informacji zwrotnych.
+Po wyjściu z sekcji musi rozesłać od $0$ do $n-1$ procesom powiadomienie o zwolnieniu prześcieradeł.
+Złożoność komunikacyjna wynosi w takiej sytuacji nie mniej niż $2(n-1)$, a czasowa --- $2$.
+
 \subsection{Domy}
-Każdy proces stara się zarezerwować sobie dom do straszenia, przy czym jeden dom nie może być rezerwowany zbyt często. Wprowadzamy dodatkową zmienną tablicową boolowską $H[D]$ informującą o tym, czy w danym domu można straszyć.
+Każdy proces stara się zarezerwować sobie dom do straszenia, przy czym jeden dom nie może być rezerwowany zbyt często. Wprowadzamy dodatkową tablicową zmienną logiczną $H[D]$ informującą o tym, czy w danym domu można straszyć.
 \begin{enumerate}
-    \item Proces zaczyna rezerwację domów od domu o numerze $ i = pid * \frac{D}{n}$.
+    \item Proces zaczyna rezerwację domów od domu o numerze $ i = \lfloor pid * \frac{D}{n} \rfloor$.
     \item Jeśli $H[i] == false$ to proces stara się o rezerwację domu o numerze $(++i) \% D$.
     \item Proces wysyła do wszystkich pozostałych procesów informację o domu w którym chce straszyć.
-    \item Jeśli proces otrzymujący wiadomość nie chce straszyć w tym domu, lub jest młodszy wysyła zgodę. W przeciwnym wypadku wysyła zabronienie.
-    \item Jeśli proces otrzyma od wszystkich zgodę może straszyć w domu, ustawia $H[i] = false$, oraz $H[j] = true$, gdzie $j$ to identyfikator domu w którym straszył sotatnio. Jeśli otrzyma chociaż jedno zabronienie stara się o rezerwację domu o numerze $(++i) \% D$
+    \item Jeśli proces otrzymujący wiadomość nie chce straszyć w tym domu lub jest młodszy, a $H[i] != false$  wysyła zgodę. W przeciwnym przypadku wysyła zabronienie.
+    \item Jeśli proces otrzyma od wszystkich zgodę może straszyć w domu, ustawia $H[i] = false$, oraz $H[j] = true$, gdzie $j$ to identyfikator domu w którym straszył ostatnio. Jeśli otrzyma chociaż jedno zabronienie stara się o rezerwację domu o numerze $(++i) \% D$
 \end{enumerate}
 
-*W przypadku gdy dostaliśmy zgodę na wejście do sekcji krytycznej od starszego procesu, który następnie sam chce wejść do tej sekcji wysyłamy mu naszą zgodę, cofamy sobie jego zgodę i prosimy o nią ponownie (dostaniemy ją po tym jak starszy proces opuści sekcję krytyczną).
+Aby przejść przez tą sekcję krytyczną proces musi wysłać $n-1$ wiadomości o ubieganiu się o dostęp 
+oraz musi otrzymać tyleż informacji zwrotnych.
+Złożoność komunikacyjna wynosi w takiej sytuacji nie więcej niż $2(n-1)$, a czasowa --- $2$.
+
+
 
 %%%%%%%%%%%%%%%% literatura %%%%%%%%%%%%%%%%
 
