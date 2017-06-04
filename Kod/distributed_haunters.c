@@ -31,10 +31,10 @@ status grupy egzorcystow
 1    chca dom
 2    otrzymali dom
 3    nie dostana danego domu
-4   chca kasprzaga i sprzęt do mgły
-5   otrzymali kasprzaga i mgłę
-6   chcą prześcieradła
-7   otrzymali prześcieradła
+4    chca kasprzaga i sprzęt do mgły
+5    otrzymali kasprzaga i mgłę
+6    chcą prześcieradła
+7    otrzymali prześcieradła
 */
 
 int size,pid;
@@ -76,7 +76,7 @@ void dream(int sec){
 
 void MY_Send(int *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm){
 
-    //cprintf("Sending to %d",dest);
+    cprintf(": Sending to %d",dest);
     int msg[2];
     msg[0] = buf[0];
     struct sembuf s;
@@ -92,12 +92,12 @@ void MY_Send(int *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_
 
     MPI_Send(msg,2,MPI_INT,dest,tag,comm);
 
-    //cprintf("Sent %d to %d tagged %d",buf[0],dest,tag);
+    cprintf(": Sent %d to %d tagged %d",buf[0],dest,tag);
 }
 
 bool MY_Recv(int *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status *status){//returns true if receiver is older than sender
 
-    //cprintf("Receiving from %d",source);
+    cprintf(": Receiving from %d",source);
 
     struct sembuf s;
     s.sem_num = 0;
@@ -109,7 +109,7 @@ bool MY_Recv(int *buf, int count, MPI_Datatype datatype, int source, int tag, MP
     int clock;
 
     MPI_Recv(msg,2,datatype,source,tag,comm,status);
-
+    
     buf[0] = msg[0];
     clock = msg[1];
 
@@ -121,7 +121,7 @@ bool MY_Recv(int *buf, int count, MPI_Datatype datatype, int source, int tag, MP
     s.sem_op = 1;
     semop(clockSem, &s, 1);
 
-    //cprintf("Recv %d from %d tagged %d",buf[0],status->MPI_SOURCE,status->MPI_TAG);
+    cprintf(": Recv %d from %d tagged %d",buf[0],status->MPI_SOURCE,status->MPI_TAG);
 
     return older;
 }
@@ -131,7 +131,7 @@ void initVars(int argc, char** argv){
         fprintf(stderr,"Number of parameters isn't proper (1 - K, 2 - M, 3 - P, ... - z)!\n");
         MPI_Abort(MPI_COMM_WORLD,1);
     }
-
+    
     clockSem = semget(1234, 1, IPC_CREAT);
     semctl(clockSem, 0, SETVAL, 1);
     sscanf(argv[1],"%d",&K);
@@ -153,11 +153,15 @@ void initVars(int argc, char** argv){
         int i=0;
         for(;i<size ; i++){
             sscanf(argv[i+5],"%d",&(z[i]));
+            if(z[i]>P){
+                fprintf(stderr,"z[%d]<P\n",i);
+                MPI_Abort(MPI_COMM_WORLD,1);
+            }
             kmProcesses[i] = -1;
             pProcesses[i] = -1;
             if (i != pid)
                 pReserved[i] = z[i];
-            else
+            else 
                 pReserved[i] = 0;
         }
         for(i=0;i<D ; i++){
@@ -186,9 +190,8 @@ void *answerer(void *arg){
     bool older;
     MPI_Status status;
     while(!stop){
-        //cprintf("countD=%d, pstat=%d,di=%d, dj=%d, H[i]=%d, H[j]=%d",countD,pstat,di,dj, H[di],H[dj]);
         older = MY_Recv(&buf,1,MPI_INT,MPI_ANY_SOURCE,MPI_ANY_TAG,MPI_COMM_WORLD,&status);
-
+        
         switch(status.MPI_TAG){
             case DREQ:
                 if((di==buf && older) || !H[buf]){
@@ -198,7 +201,7 @@ void *answerer(void *arg){
                     countD = 0;
                 }
 
-                MY_Send(&buf,1,MPI_INT,status.MPI_SOURCE,DACK,MPI_COMM_WORLD);
+                MY_Send(&buf,1,MPI_INT,status.MPI_SOURCE,DACK,MPI_COMM_WORLD);        
                 break;
             case DACK:
                 if(buf == -1){
@@ -274,19 +277,20 @@ void lockKP() {
         MY_Send(&kmRequestID, 1, MPI_INT, i, KMREQ, MPI_COMM_WORLD);
     }
     while (pstat != 5);
-
+    
 }
 
 void lockD(){
     di = pid * D/size;
-
+    
     do{
         pstat = 1;
-        cprintf("Tries %d",di);
-        while(!H[di]) di=(di+1)%D;
 
+        while(!H[di]) di=(di+1)%D;    
 
-            int k;
+        cprintf(": Tries %d",di);
+
+        int k;
         for(k=0 ; k<size ; k++){
             if(k==pid) continue;
             MY_Send(&di,1,MPI_INT,k,DREQ,MPI_COMM_WORLD);
@@ -333,10 +337,10 @@ int main(int argc, char** argv){
     MPI_Comm_size(MPI_COMM_WORLD,&size);
     MPI_Comm_rank(MPI_COMM_WORLD,&pid);
 
-    initVars(argc,argv);
+    initVars(argc,argv);    
 
     srand(time(NULL));
-
+    
     MPI_Barrier(MPI_COMM_WORLD);
 
     pthread_t thread;
@@ -347,7 +351,7 @@ int main(int argc, char** argv){
     int i;
     for(i=0 ; i<LIMIT ; i++){
         //----------KASPRZAK & FOG------------
-        cprintf("Wants to take Kasprzak and fog machine");
+        //cprintf("Wants to take Kasprzak and fog machine");
         lockKP();
         cprintf("Kasprzak and fog machine taken");
         dream(0);
@@ -362,8 +366,7 @@ int main(int argc, char** argv){
         dream(rand()%6);
         cprintf("Left house %d",di);
         dream(rand()%3);
-        putEverythingBack();
-        cprintf("Everything has been put back.")
+            putEverythingBack();
     }
 
     cprintf("%d. process finished.",pid);
@@ -373,6 +376,6 @@ int main(int argc, char** argv){
     free(H);
     free(z);
     MPI_Finalize();
-    pthread_join(thread,NULL);
+    pthread_join(thread,NULL);    
 }
 
