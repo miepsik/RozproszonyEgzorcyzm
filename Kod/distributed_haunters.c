@@ -50,10 +50,10 @@ bool *H;
 void cprintf(const char* format,...){
     char frmt[128] = "";
 
-    sprintf(frmt,"%d : ",pid);
+    sprintf(frmt,"%d : ",lclock);
     {
         char tmp[10];
-        sprintf(tmp,"%d : ",lclock);
+        sprintf(tmp,"%d : ",pid);
         strcat(frmt,tmp);
     }
     va_list args;
@@ -195,7 +195,7 @@ void *answerer(void *arg){
         switch(status.MPI_TAG){
             case DREQ:
                 if((di==buf && older) || !H[buf]){
-                    buf = -1;
+                    buf = -di;
                 } else if(di==buf && !older){
                     pstat = 3;
                     countD = 0;
@@ -204,7 +204,7 @@ void *answerer(void *arg){
                 MY_Send(&buf,1,MPI_INT,status.MPI_SOURCE,DACK,MPI_COMM_WORLD);        
                 break;
             case DACK:
-                if(buf == -1){
+                if(buf == -di && pstat == 1){
                     pstat = 3;
                     countD = 0;
                 } else if (buf == di && pstat == 1){
@@ -225,7 +225,7 @@ void *answerer(void *arg){
                 }
                 break;
             case KMACK:
-                if (buf == kmRequestID) {
+                if (buf == kmRequestID && pstat==4) {
                     if (++countKM >= size - M)
                         pstat = 5;
                 }
@@ -241,7 +241,7 @@ void *answerer(void *arg){
                 }
                 break;
             case PACK:
-                if (buf == pRequestID) {
+                if (buf == pRequestID && pstat==6) {
                     pReserved[status.MPI_SOURCE] = 0;
                     int sum = 0;
                     for (buf = 0; buf < size; buf++)
@@ -293,11 +293,13 @@ void lockD(){
         int k;
         for(k=0 ; k<size ; k++){
             if(k==pid) continue;
+            if(pstat==3)break;
             MY_Send(&di,1,MPI_INT,k,DREQ,MPI_COMM_WORLD);
         }
         while(pstat==1)dream(0);
 
-        di = pstat==3?(di+1)%D:di;
+        di = pstat!=2?(di+1)%D:di;
+        if(pstat!=1 && pstat!=2 && pstat!=3) cprintf("Error - pstat=%d",pstat);
     } while(pstat==3);
 
     H[di] = false;
@@ -351,7 +353,7 @@ int main(int argc, char** argv){
     int i;
     for(i=0 ; i<LIMIT ; i++){
         //----------KASPRZAK & FOG------------
-        //cprintf("Wants to take Kasprzak and fog machine");
+        cprintf("Wants to take Kasprzak and fog machine");
         lockKP();
         cprintf("Kasprzak and fog machine taken");
         dream(0);
@@ -359,6 +361,7 @@ int main(int argc, char** argv){
         cprintf("Wants to take %d sheets", z[pid]);
         lockP();
         cprintf("Sheet taken");
+        dream(0);
         //----------HOUSE-----------------
         cprintf("Wants to enter house %d. time",i+1);
         lockD();
@@ -366,7 +369,7 @@ int main(int argc, char** argv){
         dream(rand()%6);
         cprintf("Left house %d",di);
         dream(rand()%3);
-            putEverythingBack();
+        putEverythingBack();
     }
 
     cprintf("%d. process finished.",pid);
