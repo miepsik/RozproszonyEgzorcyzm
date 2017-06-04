@@ -226,8 +226,11 @@ void *answerer(void *arg){
                 break;
             case KMACK:
                 if (buf == kmRequestID) {
-                    if (++countKM >= size - M)
+                    if (++countKM >= size - M) {
                         pstat = 5;
+                        kmRequestID++;
+                        countKM = 0;
+                    }
                 }
                 break;
             case PREQ:
