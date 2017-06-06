@@ -91,9 +91,9 @@ Każdy proces stara się zarezerwować sobie dom do straszenia, przy czym jeden 
     \item Jeśli proces otrzyma od wszystkich zgodę może straszyć w domu, ustawia $H[i] = false$, oraz $H[j] = true$, gdzie $j$ to identyfikator domu w którym straszył ostatnio. Jeśli otrzyma chociaż jedno zabronienie stara się o rezerwację domu o numerze $(++i) \% D$
 \end{enumerate}
 
-Aby przejść przez tą sekcję krytyczną proces musi wysłać $n-1$ wiadomości o ubieganiu się o dostęp 
+Aby przejść przez tą sekcję krytyczną proces musi wysłać $k(n-1)$ wiadomości o ubieganiu się o dostęp, gdzie $k$ to liczba domów do których starał się dostać,
 oraz musi otrzymać tyleż informacji zwrotnych.
-Złożoność komunikacyjna wynosi w takiej sytuacji nie więcej niż $2(n-1)$, a czasowa --- $2$.
+Złożoność komunikacyjna wynosi w takiej sytuacji $2k(n-1)$, a czasowa --- $2k$.
 
 
 
